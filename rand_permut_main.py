@@ -2,7 +2,6 @@
 import sys
 sys.path.append('..')
 from optimizers import SGD
-from trainers import RnnlmTrainer
 from dataset.random_permut import generate_batch
 from models import *
 import csv
@@ -25,16 +24,6 @@ parser.add_argument("--seed", type=int, default=None)
 parser.add_argument("--learning_rate", '-lr', type=float, default=0.01)
 args = parser.parse_args()
 
-def clip_grads(grads, max_norm):
-    total_norm = 0
-    for key in grads.keys():
-        total_norm += np.sum(grads[key]**2)
-    total_norm = np.sqrt(total_norm)
-
-    rate = max_norm / (total_norm + 1e-6)
-    if rate < 1:
-        for key in grads.keys():
-            grads[key] *= rate
 
 def grad_norm(grads):
     norm = 0.0
@@ -59,7 +48,6 @@ if args.model == 'RNN':
 else:
     model = LSTMLM(vocab_size=100, hidden_size=50, seed=args.seed)
 optimizer = SGD(optimizer_params)
-trainer = RnnlmTrainer(model, optimizer)
 
 acc_list = []
 loss_list = []
@@ -72,10 +60,10 @@ for iter in range(max_iteration):
 
     loss = model.forward(train_xs, train_ts)
     grads = model.backward()
-    norm_list.append(grad_norm(grads))
-    #clip_grads(grads, 1.0)
+
     optimizer.update(grads, model.params)
     loss_list.append(loss)
+    norm_list.append(grad_norm(grads))
 
     # evaluate
     test_xs, test_ts = generate_batch(sequence_length=sequence_length, batch_size=100)

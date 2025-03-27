@@ -1,164 +1,90 @@
 import numpy as np
-from layers import *
+import layers
 
-class RNNLM:
-    def __init__(self, vocab_size, hidden_size, seed):
-
+class RNN_manyToOne:
+    def __init__(self, nin, nout, hidden_size, scale, stateful=False, seed=None):
+        self.stateful = stateful
         if seed is not None:
             np.random.seed(seed)
 
-        scale = 0.1
-        #embed_W = (np.random.randn(vocab_size, embed_size) / 100).astype('f')
-        embed_W = np.eye(vocab_size).astype('f')
-        rnn_Wx = scale * (np.random.randn(vocab_size, hidden_size)).astype('f')
-        rnn_Wh = scale * (np.random.randn(hidden_size, hidden_size)).astype('f')
-        rnn_b = (np.zeros(hidden_size)).astype('f')
-        affine_W = scale * (np.random.randn(hidden_size, vocab_size)).astype('f')
-        affine_b = (np.zeros(vocab_size)).astype('f')
+        embed_W = np.eye(nin).astype('f') # does nothing but converts labels to one hot vector
+        self.rnn_Wx = scale * (np.random.randn(nin, hidden_size)).astype('f')
+        self.rnn_Wh = scale * (np.random.randn(hidden_size, hidden_size)).astype('f')
+        self.rnn_bx = np.zeros(hidden_size).astype('f')
+        self.rnn_Wy = scale * (np.random.randn(hidden_size, nout)).astype('f')
+        self.rnn_by = np.zeros(nout).astype('f')
 
-        #self.embed_layer = TimeEmbedding(embed_W)
+        self.params = [self.rnn_Wx, self.rnn_Wh, self.rnn_Wy,
+                       self.rnn_bx, self.rnn_by]
+
+        np.random.seed()
+
         self.embed_W = embed_W
-        self.rnn_layer = TimeRNN(rnn_Wh, rnn_Wx, rnn_b)
-        self.affine_layer = TimeAffine(affine_W, affine_b)
-        self.loss_layer = TimeSoftmaxWithLoss_manytoone()
+        self.rnn_layer = [] # this list will be filled with RNN units during forward propagation
+        self.loss_layer = layers.SoftmaxWithLoss_unit()
 
-        self.params = {}
-        #self.params['Embed'] = self.embed_layer.W
-        self.params['Rnn_Wh'] = self.rnn_layer.Wh
-        self.params['Rnn_Wx'] = self.rnn_layer.Wx
-        self.params['Rnn_b'] = self.rnn_layer.b
-        self.params['Affine_W'] = self.affine_layer.W
-        self.params['Affine_b'] = self.affine_layer.b
+        self.final_h = None
 
-        # cache
-        self.loss = None
-        self.h_prev = None
-
-    def forward(self, x, t):
+    def forward(self, input_xs, targets):
         """
-        x shape : (N, T, D)
-                  (N, T,)
-        t shape : (N, T, D)
-                  (N, T,)
-                  (N, )
+        input_xs shape : (N, T)
+        targets shape : (N, )
         """
+        N, T = input_xs.shape
+        embeded = self.embed_W[input_xs] # (N, T, D)
 
-        out = self.embed_W[x]
-        out = self.rnn_layer.forward(out, self.h_prev)
-        self.h_prev = out[:, -1, :].copy()
-        out = self.affine_layer.forward(out)
-
-        self.loss = self.loss_layer.forward(out, t)
-        weight_decay = 0.0
+        if not self.stateful or self.final_h is None:
+            self.final_h = np.zeros(shape=(N, self.rnn_Wh.shape[0])).astype('f')
         
+        for t in range(T):
+            new_layer = layers.RNN_unit(self.rnn_Wh, self.rnn_Wx, self.rnn_Wy, self.rnn_bx, self.rnn_by)
+            self.final_h, output_y = new_layer.forward(embeded[:, t], self.final_h)
+            self.rnn_layer.append(new_layer)
 
-        return self.loss
+        loss = self.loss_layer.forward(output_y, targets)
+        return loss
 
-    def generate(self, x):
-        out = self.embed_W[x]
-        out = self.rnn_layer.forward(out, None)
-        out = self.affine_layer.forward(out)
+    def predict(self, input_xs):
+        """
+        input_xs shape : (N, T)
+        """
+        N, T = input_xs.shape
+        embeded = self.embed_W[input_xs] # (N, T, D)
 
-        return out
+        if not self.stateful or self.final_h is None:
+            self.final_h = np.zeros(shape=(N, self.rnn_Wh.shape[0])).astype('f')
+        
+        for t in range(T):
+            new_layer = layers.RNN_unit(self.rnn_Wh, self.rnn_Wx, self.rnn_Wy, self.rnn_bx, self.rnn_by)
+            self.final_h, output_y = new_layer.forward(embeded[:, t], self.final_h)
+
+        return output_y
 
     def backward(self, dout=1):
+        
+        grads = [np.zeros_like(self.rnn_Wx), 
+                 np.zeros_like(self.rnn_Wh),
+                 np.zeros_like(self.rnn_Wy),
+                 np.zeros_like(self.rnn_bx),
+                 np.zeros_like(self.rnn_by)]
 
-        dout = self.loss_layer.backward(dout)
-        dout = self.affine_layer.backward(dout)
-        dout = self.rnn_layer.backward(dout)
+        dy = self.loss_layer.backward(dout) # -> (N, D)
+        dh = 0.0
+        for rnn_unit in reversed(self.rnn_layer):
+            dh, dinput_x = rnn_unit.backward(dh, dy)
+            dy = np.zeros_like(dy)
+            
+            grads[0] += rnn_unit.dWx
+            grads[1] += rnn_unit.dWh
+            grads[2] += rnn_unit.dWy
+            grads[3] += rnn_unit.dbx
+            grads[4] += rnn_unit.dby
 
-        grads = {}
-        grads['Rnn_Wh'] = self.rnn_layer.dWh
-        grads['Rnn_Wx'] = self.rnn_layer.dWx
-        grads['Rnn_b'] = self.rnn_layer.db
-        grads['Affine_W'] = self.affine_layer.dW
-        grads['Affine_b'] = self.affine_layer.db
-
+        self.rnn_layer.clear()
         return grads
     
     def reset_state(self):
-        self.h_prev = None
+        self.final_h = None
 
-
-class LSTMLM:
-    def __init__(self, vocab_size, hidden_size, seed):
-        # initialize weights
-
-        if seed is not None:
-            np.random.seed(seed)
-
-        scale = 0.1
-        #embed_w = (np.random.randn(vocab_size, embed_size) / 100).astype('f')
-        embed_W = np.eye(vocab_size).astype('f')
-        lstm_Wx = scale * (np.random.randn(vocab_size, 4 * hidden_size)).astype('f')
-        lstm_Wh = scale * (np.random.randn(hidden_size, 4 * hidden_size)).astype('f')
-        lstm_b = np.zeros(4* hidden_size).astype('f')
-        affine_W = scale * (np.random.randn(hidden_size, vocab_size)).astype('f')
-        affine_b = np.zeros(vocab_size).astype('f')
-
-        # build layers
-        #self.embed_layer = TimeEmbedding(embed_w)
-        self.embed_W = embed_W
-        self.lstm_layer = TimeLSTM(lstm_Wh, lstm_Wx, lstm_b)
-        self.affine_layer = TimeAffine(affine_W, affine_b)
-        self.loss_layer = TimeSoftmaxWithLoss_manytoone()
-
-        self.params = {}
-        #self.params['Embed'] = self.embed_layer.W
-        self.params['LSTM_Wh'] = self.lstm_layer.Wh
-        self.params['LSTM_Wx'] = self.lstm_layer.Wx
-        self.params['LSTM_b'] = self.lstm_layer.b
-        self.params['Affine_W'] = self.affine_layer.W
-        self.params['Affine_b'] = self.affine_layer.b
-
-        # cache
-        self.loss = None
-        self.h_prev = None
-        self.c_prev = None
-
-
-    def forward(self, x, t):
-        """
-        x shape : (N, T, D)
-                  (N, T,)
-        t shape : (N, T, D)
-                  (N, T,)
-        """
-        #out = self.embed_layer.forward(x)
-        out = self.embed_W[x]
-        out, cout = self.lstm_layer.forward(out, self.h_prev, self.c_prev)
-        self.h_prev = out[:, -1, :].copy()
-        self.c_prev = cout
-        out = self.affine_layer.forward(out)
-
-        self.loss = self.loss_layer.forward(out, t)
-        return self.loss
-
-    def generate(self, x):
-        #out = self.embed_layer.forward(x)
-        out = self.embed_W[x]
-        out, cout = self.lstm_layer.forward(out, None, None)
-        out = self.affine_layer.forward(out)
-
-        return out
-
-    def backward(self, dout=1):
-
-        dout = self.loss_layer.backward(dout)
-        dout = self.affine_layer.backward(dout)
-        dout = self.lstm_layer.backward(dout)
-        #self.embed_layer.backward(dout)
-
-        grads = {}
-        #grads['Embed'] = self.embed_layer.dW
-        grads['LSTM_Wh'] = self.lstm_layer.dWh
-        grads['LSTM_Wx'] = self.lstm_layer.dWx
-        grads['LSTM_b'] = self.lstm_layer.db
-        grads['Affine_W'] = self.affine_layer.dW
-        grads['Affine_b'] = self.affine_layer.db
-
-        return grads
-
-    def reset_state(self):
-        self.h_prev = None
-        self.c_prev = None
+class LSTM_manyToOne:
+    pass

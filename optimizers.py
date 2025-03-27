@@ -5,5 +5,5 @@ class SGD:
         self.lr = optimizer_params['lr']
 
     def update(self, grads, params):
-        for key in params.keys():
-            params[key] -= self.lr * grads[key]
+        for i, param in enumerate(params):
+            param -= self.lr * grads[i]

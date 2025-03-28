@@ -122,7 +122,7 @@ class LSTM_manyToOne:
 
         if not self.stateful or self.final_h is None:
             self.final_h = np.zeros(shape=(N, self.lstm_Wh.shape[0])).astype('f')
-            self.final_c = np.zeros(shape=(N, self.lstm_Wh.shape[0]//4)).astype('f')
+            self.final_c = np.zeros(shape=(N, self.lstm_Wh.shape[0])).astype('f')
         
         for t in range(T):
             new_layer = layers.LSTM_unit(self.lstm_Wh, self.lstm_Wx, self.lstm_b, self.lstm_Wy, self.lstm_by)
@@ -138,7 +138,7 @@ class LSTM_manyToOne:
 
         if not self.stateful or self.final_h is None:
             self.final_h = np.zeros(shape=(N, self.lstm_Wh.shape[0])).astype('f')
-            self.final_c = np.zeros(shape=(N, self.lstm_Wh.shape[0]//4)).astype('f')
+            self.final_c = np.zeros(shape=(N, self.lstm_Wh.shape[0])).astype('f')
 
         for t in range(T):
             new_layer = layers.LSTM_unit(self.lstm_Wh, self.lstm_Wx, self.lstm_b, self.lstm_Wy, self.lstm_by)

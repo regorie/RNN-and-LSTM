@@ -103,7 +103,7 @@ class LSTM_unit:
         self.dby = np.sum(dy, axis=0)
 
         dh += np.matmul(dy, self.Wy.T)
-        dc += dh * self.O
+        dc += dh * self.O * (1 - np.tanh(self.c) ** 2)
 
         dI = dc * self.G * self.I * (1 - self.I)
         dF = dc * self.c_prev * self.F * (1 - self.F)

@@ -12,28 +12,21 @@ import matplotlib.pyplot as plt
 from clip_grad import clip_grads
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--attempt", "-a", type=int, required=False, default=100)
+parser.add_argument("--exp_no", "-en", type=int, required=True)
 parser.add_argument("--evalinterval", '-ei', type=int, default=20)
 parser.add_argument("--saveparams", '-sp', type=int, default=1)
 parser.add_argument("--sequence_length", '-sq', type=int, default=25)
+parser.add_argument("--state_reset", '-srt', type=int, default=1)
 parser.add_argument("--iteration", '-iter', type=int, default=10)
 parser.add_argument("--batch_size", '-bs', type=int, default=20)
 parser.add_argument("--hidden_size", '-hs', type=int, default=50)
 parser.add_argument("--model", '-m', type=str, default='RNN')
 parser.add_argument("--seed", type=int, default=None)
 parser.add_argument("--learning_rate", '-lr', type=float, default=0.01)
-parser.add_argument("--clip_grad", '-clip', type=int, default=1)
+parser.add_argument("--clip_grad", '-clip', type=float, default=1.0)
+parser.add_argument("--target_accuracy", '-ta', type=float, default=0.99)
 args = parser.parse_args()
 
-#train_xs, train_ts = generate_batch(sequence_length=25, batch_size=3)
-#print(train_xs)
-#print(train_ts)
-
-def grad_norm(grads):
-    norm = 0.0
-    for grad in grads:
-        norm += np.sum(grad**2)
-    return np.sqrt(norm)
 
 # 하이퍼파라미터 설정
 batch_size = args.batch_size
@@ -43,37 +36,43 @@ sequence_length = args.sequence_length
 max_iteration = args.iteration
 eval_interval = args.evalinterval
 
+if args.state_reset == 0:
+    stateful = False
+else:
+    stateful = True
+
 optimizer_params = {'lr':args.learning_rate}
 
 
 # 모델 생성
 if args.model == 'RNN':
-    model = RNN_manyToOne(nin=6, nout=4, hidden_size=50, scale=0.1, stateful=True, seed=args.seed)
+    model = RNN_manyToOne(nin=6, nout=4, hidden_size=50, scale=0.1, stateful=stateful, seed=args.seed)
 else:
-    model = LSTM_manyToOne(nin=6, nout=4, hidden_size=50, seed=args.seed)
+    model = LSTM_manyToOne(nin=6, nout=4, hidden_size=50, scale=0.1, stateful=stateful, seed=args.seed)
 optimizer = SGD(optimizer_params)
 
-acc_list = []
-loss_list = []
-norm_list = []
+results = []
+norm_sum = 0.0
+loss_sum = 0.0
 start = time.time()
 for iter in range(max_iteration//eval_interval):
     for inneriter in range(eval_interval):
         # train
         train_xs, train_ts = generate_batch(sequence_length=sequence_length, batch_size=batch_size)
 
-        loss = model.forward(train_xs, train_ts)
+        loss_sum += model.forward(train_xs, train_ts)
         grads = model.backward()
 
-        if args.clip_grad == 1:
-            clip_grads(grads, 1.0)
+        if args.clip_grad > 0.0:
+            norm_sum += clip_grads(grads, args.clip_grad)
 
         optimizer.update(grads, model.params)
 
-        loss_list.append(loss)
-        #norm_list.append(grad_norm(grads))
-
     ##### evaluate #####
+    if args.stateful == 2:
+        hidden_state = model.final_h
+        if hasattr(model, "final_c"): cell_state = model.final_c
+
     test_xs, test_ts = generate_batch(sequence_length=sequence_length, batch_size=10000)
 
     correct = 0
@@ -84,36 +83,27 @@ for iter in range(max_iteration//eval_interval):
         if seq == answers[i]: correct += 1
     acc = correct/test_ts.shape[0]
     print("Iteration {} Accuracy {}".format(iter*eval_interval, acc))
-    acc_list.append(acc)
-    model.reset_state()
+
+    results.append([acc, loss_sum/eval_interval, norm_sum/eval_interval])
+    loss_sum = 0.0
+    norm_sum = 0.0
+
     if acc >= 0.99 : break
+
+    model.reset_state()
+    if args.stateful == 2:
+        model.final_h = hidden_state
+        if hasattr(model, "final_c"): model.final_c = cell_state
 
 end = time.time()
 print("total time taken: ", end-start)
 
-#plt.plot(np.arange(len(acc_list)), acc_list)
-#plt.ylim(-0.2,1.2)
-#plt.show()
 
-#plt.plot(np.arange(len(norm_list)), norm_list)
-#plt.ylim(-0.2,1.2)
-#plt.show()
-
-# 결과 저장
-#trainer.plot(None)
-
-"""
-with open('../My_Result/Exp_5_epoch'+str(max_epoch)+'('+str(args.attempt)+').csv', 'w+', newline='') as f:
+with open('./Result/results({}).csv'.format(args.exp_no), 'w+', newline='') as f:
     write = csv.writer(f)
-    write.writerow(trainer.ppl_list)
+    write.writerows(results)
 
-trainer.plot(file_name='../My_Result/Exp_5_epoch'+str(max_epoch)+'('+str(args.attempt)+').png')
-
-# save model params
-model.reset_state()
-
-if bool(args.saveparams):
+if args.saveparams == 1:
     params = model.params
-    with open('../My_Result/Models/Exp_5_epoch'+str(max_epoch)+'('+str(args.attempt)+').pkl', 'wb+') as f:
-        pickle.dump(model, f)
-"""
+    with open('./Result/Models/model_params({}).pkl'.format(args.exp_no), 'wb+') as f:
+        pickle.dump(params, f)

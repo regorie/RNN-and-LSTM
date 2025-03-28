@@ -86,13 +86,13 @@ class LSTM_unit:
         self.input_x = input_x
 
         sum_t = np.matmul(input_x, self.Wx) + np.matmul(h_prev, self.Wh) + self.b
-        self.I = sum_t[:,    :H,   :] # 0 - H-1
-        self.F = sum_t[:,   H:2*H, :] # H - 2H-1
-        self.O = sum_t[:, 2*H:3*H, :] # 2H - 3H-1
-        self.G = sum_t[:, 3*H:,    :]
+        self.I = f.sigmoid(sum_t[:,    :H]) # 0 - H-1
+        self.F = f.sigmoid(sum_t[:,   H:2*H]) # H - 2H-1
+        self.O = f.sigmoid(sum_t[:, 2*H:3*H]) # 2H - 3H-1
+        self.G = np.tanh(sum_t[:, 3*H:])
 
-        self.c = f.sigmoid(self.F) * c_prev + np.tanh(self.G) * f.sigmoid(self.I)
-        self.h = f.sigmoid(self.O) * np.tanh(self.c)
+        self.c = self.F * c_prev + self.G * self.I
+        self.h = self.O * np.tanh(self.c)
 
         self.output_y = np.matmul(self.h, self.Wy) + self.by
 
@@ -103,14 +103,14 @@ class LSTM_unit:
         self.dby = np.sum(dy, axis=0)
 
         dh += np.matmul(dy, self.Wy.T)
-        dc += dh * f.sigmoid(self.O)
+        dc += dh * self.O
 
-        dI = dc * np.tanh(self.G) * f.sigmoid(self.I) * (1 - f.sigmoid(self.I))
-        dF = dc * self.c_prev * f.sigmoid(self.F) * (1 - f.sigmoid(self.F))
-        dO = dh * np.tanh(self.c) * f.sigmoid(self.O) * (1 - f.sigmoid(self.O))
-        dG = dc * f.sigmoid(self.I) * (1 - np.tanh(self.G)**2)
+        dI = dc * self.G * self.I * (1 - self.I)
+        dF = dc * self.c_prev * self.F * (1 - self.F)
+        dO = dh * np.tanh(self.c) * self.O * (1 - self.O)
+        dG = dc * self.I * (1 - self.G**2)
 
-        dsum_t = np.hstack(dI, dF, dO, dG)
+        dsum_t = np.hstack((dI, dF, dO, dG))
 
         self.dWh = np.matmul(self.h_prev.T, dsum_t)
         self.dWx = np.matmul(self.input_x.T, dsum_t)
@@ -118,7 +118,7 @@ class LSTM_unit:
 
         dh_prev = np.matmul(dsum_t, self.Wh.T)
         dinput_x = np.matmul(dsum_t, self.Wx.T)
-        dc_prev = dc * f.sigmoid(self.F)
+        dc_prev = dc * self.F
 
         return dh_prev, dc_prev, dinput_x
 

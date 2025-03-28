@@ -11,3 +11,5 @@ def clip_grads(grads, thres=1.0):
     if rate < 1:
         for grad in grads:
             grad *= rate
+
+    return total_norm

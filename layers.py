@@ -54,7 +54,8 @@ class LSTM_unit:
                  Wy, by):
         """
         Wh shape : (H, 4H)
-        Wx shape : (D, 4H)
+        Wx shape : (Din, 4H)
+        Wy shape : (H, Dout)
         """
         self.Wh = Wh
         self.Wx = Wx
@@ -122,6 +123,126 @@ class LSTM_unit:
 
         return dh_prev, dc_prev, dinput_x
 
+class LSTM_unit_legacy:
+    """
+    From 1997 Long Short Term memory
+    The first version of LSTM does not have a forget gate, it has only input and output gates
+    weights : Wi, Wc, Wo
+    """
+    def __init__(self, num_of_cell_per_block, num_of_memblock,
+                 Wh, Wx, b,
+                 Wy, by):
+        """
+        Wh shape : (H, 3H)
+        Wx shape : (Din, 3H)
+        Wy shape : (H, Dout)
+        """
+        class MemBlock:
+            def __init__(self, num_cell, Wh, Wx, b):
+                self.Wh = Wh
+                self.Wx = Wx
+                self.b = b
+
+                self.num_cell = num_cell
+                self.cells = []
+                
+        self.memblock = []
+        for i in range(num_of_memblock):
+            new_block = MemBlock(num_of_cell_per_block, Wh, Wx, b)
+            self.memblock.append(new_block)
+
+        self.Wy = Wy
+        self.by = by
+
+        self.dWx = None
+        self.dWh = None
+        self.db = None
+        self.dWy = None
+        self.dby = None
+
+        # cache
+        self.c = None
+        self.h = None
+        self.h_prev = None
+        self.c_prev = None
+        self.input_x = None
+        self.output_y = None
+
+        self.I, self.G, self.O = None, None, None, None
+
+    def forward(self, input_x, h_prev, c_prev):
+        N, H = h_prev.shape
+        self.h_prev = h_prev
+        self.c_prev = c_prev
+        self.input_x = input_x
+
+        sum_t = np.matmul(input_x, self.Wx) + np.matmul(h_prev, self.Wh) + self.b
+        self.I = f.sigmoid(sum_t[:,    :H]) # 0 - H-1
+        self.O = f.sigmoid(sum_t[:, H:2*H]) # 2H - 3H-1
+        self.G = np.tanh(sum_t[:, 2*H:])
+
+        self.c = c_prev + self.G * self.I
+        self.h = self.O * np.tanh(self.c)
+
+        self.output_y = np.matmul(self.h, self.Wy) + self.by
+
+        return self.h, self.c, self.output_y
+
+    def backward(self):
+        pass
+
+class LSTM_unit_forgetgate:
+    """
+    From 2000 Learning to forget
+    Forget gate was introduced to the cell.
+    weights : Wi, Wc, Wo, Wf
+    """
+    def __init__(self, num_of_cell, num_of_memblock,
+                 Wh, Wx, b,
+                 Wy, by):
+        self.Wh = Wh
+        self.Wx = Wx
+        self.b = b
+        self.Wy = Wy
+        self.by = by
+
+        self.dWh = None
+        self.dWx = None
+        self.db = None
+        self.dWy = None
+        self.dby = None
+
+        # cache
+        self.c = None
+        self.h = None
+        self.h_prev = None
+        self.c_prev = None
+        self.input_x = None
+        self.output_y = None
+
+        self.I, self.G, self.F, self.O = None, None, None, None
+
+    def forward(self, input_x, h_prev, c_prev):
+        N, H = h_prev.shape
+        self.h_prev = h_prev
+        self.c_prev = c_prev
+        self.input_x = input_x
+
+        sum_t = np.matmul(input_x, self.Wx) + np.matmul(h_prev, self.Wh) + self.b
+        self.I = f.sigmoid(sum_t[:,    :H]) # 0 - H-1
+        self.F = f.sigmoid(sum_t[:,   H:2*H]) # H - 2H-1
+        self.O = f.sigmoid(sum_t[:, 2*H:3*H]) # 2H - 3H-1
+        self.G = np.tanh(sum_t[:, 3*H:])
+
+        self.c = self.F * c_prev + self.G * self.I
+        self.h = self.O * np.tanh(self.c)
+
+        self.output_y = np.matmul(self.h, self.Wy) + self.by
+
+        return self.h, self.c, self.output_y
+
+    def backward(self):
+        pass
 
 class SoftmaxWithLoss_unit:
     def __init__(self):

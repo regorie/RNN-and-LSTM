@@ -173,3 +173,13 @@ class LSTM_manyToOne:
     def reset_state(self):
         self.final_h = None
         self.final_c = None
+
+class LSTM97_manyToOne:
+    def __init__():
+        pass
+    
+    def forward():
+        pass
+
+    def backward():
+        pass

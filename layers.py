@@ -177,18 +177,22 @@ class _MemBlock:
             # output gate
             self.O[cell_idx] = f.sigmoid(np.matmul(h_prev[:,cell_idx], self.Woh) + np.matmul(input_x, self.Wox) + self.bo)
             # cell update
-            self.G[cell_idx] = np.tanh(np.matmul(h_prev[:,cell_idx], self.Wgh[cell_idx]) + np.matmul(input_x, self.Wgx[cell_idx]) + self.bg[cell_idx])
+            self.G[cell_idx] = f.legacy_g(np.matmul(h_prev[:,cell_idx], self.Wgh[cell_idx]) + np.matmul(input_x, self.Wgx[cell_idx]) + self.bg[cell_idx])
             self.C[cell_idx] = c_prev[cell_idx] + self.I[cell_idx] * self.G[cell_idx]
             # hidden state
-            self.H[cell_idx] = self.O[cell_idx] * np.tanh(self.C[cell_idx])
+            self.H[cell_idx] = self.O[cell_idx] * f.legacy_h(self.C[cell_idx])
 
         return self.H, self.C # (num_of_cell_per_memblock, batch_size, H)
 
     def backward(self, dh, dc):
         """
         dh, dc shape : (num_of_cell, batch_size, H)
+        dh_prev, dc_prev shape : (num_of_cell, batch_size, H)
+        dinput_x shape : (batch_size, Din)
         """
-        
+        dh_prev = np.empty_like(dc)
+        dc_prev = np.empty_like(dh)
+        dinput_x = np.zeros_like(self.input_x)
         for cell_idx in range(self.num_cell):
             dc[cell_idx] += dh[cell_idx] * self.O[cell_idx] * (1 - np.tanh(self.C[cell_idx])**2)
 
@@ -204,11 +208,21 @@ class _MemBlock:
             self.dWox += np.matmul(self.input_x.T, dO)
             self.dbo += np.sum(dO, axis=0)
 
-            self.dWgh += np.matmul(self.h_prev[:,cell_idx].T, dG)
-            self.dWgx += np.matmul(self.input_x.T, dG)
-            self.dbg += np.sum(dG, axis=0)
+            self.dWgh[cell_idx] = np.matmul(self.h_prev[:,cell_idx].T, dG)
+            self.dWgx[cell_idx] = np.matmul(self.input_x.T, dG)
+            self.dbg[cell_idx] = np.sum(dG, axis=0)
 
-            dh_prev = np.matmul() # TODO
+            dh_prev[cell_idx] = np.matmul(dI, self.Wih.T)
+            dh_prev[cell_idx] += np.matmul(dO, self.Woh.T)
+            dh_prev[cell_idx] += np.matmul(dG, self.Wgh[cell_idx].T)
+
+            dinput_x += np.matmul(dI, self.Wix.T)
+            dinput_x += np.matmul(dO, self.Wox.T)
+            dinput_x += np.matmul(dG, self.Wgx[cell_idx].T)
+
+            dc_prev[cell_idx] = dc[cell_idx]
+
+        return dh_prev, dc_prev, dinput_x
 
 
 class LSTM_unit_legacy:
@@ -226,7 +240,7 @@ class LSTM_unit_legacy:
         Wx shape : (num_of_memblock, Din, 2H)
         Wgh shape : (num_of_memblock, num_of_cell_per_block, H, H)
         Wgx shape : (num_of_memblock, num_of_cell_per_block, Din, H)
-        Wy shape : (num_of_memblock, H, Dout)
+        Wy shape : (num_of_memblock * num_of_cell_per_block * H, Dout)
         """
         
         self.num_of_total_cells = num_of_cell_per_block * num_of_memblock
@@ -247,6 +261,7 @@ class LSTM_unit_legacy:
         # cache
         self.c = None
         self.h = None
+        self.concat_h = None
         self.h_prev = None
         self.c_prev = None
         self.input_x = None
@@ -272,14 +287,31 @@ class LSTM_unit_legacy:
         for i, memblock in enumerate(self.memblocks):
             self.h[i], self.c[i] = memblock.forward(input_x, h_prev[i], c_prev[i]) # (num_of_cell_per_memblock, batch_size, H)
 
-        # concat hidden states -> shape into (batch_size, num_of_memblocks * num_of_cells_per_block, H)
-        concat_h = self.h.reshape(batch_size, self.num_of_total_cells, -1)
-        self.output_y = np.matmul(concat_h, self.Wy) + self.by
+        # concat hidden states -> shape into (batch_size, num_of_memblocks * num_of_cells_per_block * H)
+        self.concat_h = self.h.reshape(batch_size, -1)
+        self.output_y = np.matmul(self.concat_h, self.Wy) + self.by
 
         return self.h, self.c, self.output_y
 
-    def backward(self):
-        pass
+    def backward(self, dh, dc, dy):
+        """
+        dh, dc shape : (num_of_memblocks, num_of_cells_per_block, batch_size, H)
+        dy shape : (batch_size, Dout)
+        """
+        dh_prev = np.empty_like(dh)
+        dc_prev = np.empty_like(dc)
+        dinput_x = np.empty_like(self.input_x)
+
+        self.dby = np.sum(dy, axis=0)
+        self.dWy = np.matmul(self.concat_h.T, dy)
+
+        dh += np.matmul(dy, self.Wy.T).reshape(dh.shape)
+
+        for i, memblock in enumerate(self.memblocks):
+            dh_prev[i], dc_prev[i], tmp = memblock.backward(dh[i], dc[i])
+            dinput_x += tmp
+
+        return dh_prev, dc_prev, dinput_x
 
 class LSTM_unit_forgetgate:
     """

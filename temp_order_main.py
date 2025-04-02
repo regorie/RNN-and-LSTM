@@ -47,8 +47,10 @@ optimizer_params = {'lr':args.learning_rate}
 # 모델 생성
 if args.model == 'RNN':
     model = RNN_manyToOne(nin=6, nout=4, hidden_size=50, scale=0.1, stateful=stateful, seed=args.seed)
-else:
+elif args.model == 'LSTM':
     model = LSTM_manyToOne(nin=6, nout=4, hidden_size=50, scale=0.1, stateful=stateful, seed=args.seed)
+elif args.model == 'LSTM97':
+    model = LSTM_manyToOne
 optimizer = SGD(optimizer_params)
 
 results = []

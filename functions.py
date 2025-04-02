@@ -15,6 +15,15 @@ def softmax(x):
 def sigmoid(x):
     return 1 / (1 + np.exp(-x))
 
+def legacy_f(x):
+    return sigmoid(x)
+
+def legacy_g(x):
+    return 4/(1 + np.exp(-x)) - 2
+
+def legacy_h(x):
+    return 2 / (1 + np.exp(-x)) -1
+
 def cross_entropy_error(y, t):
     """
     y shape : (N, C)

@@ -22,7 +22,7 @@ def legacy_g(x):
     return 4/(1 + np.exp(-x)) - 2
 
 def legacy_h(x):
-    return 2 / (1 + np.exp(-x)) -1
+    return 2 / (1 + np.exp(-x)) - 1
 
 def cross_entropy_error(y, t):
     """

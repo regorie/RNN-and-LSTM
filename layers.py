@@ -199,7 +199,7 @@ class LSTM_unit_legacy:
         self.G = f.legacy_g(np.matmul(state_input, self.Wg.T) + self.bg)
 
         IG = self.I * self.G
-        self.c = self.c_prev + np.repeat(IG, 2)
+        self.c = self.c_prev + np.repeat(IG, self.num_of_cell_per_block)
         self.h = self.O * f.legacy_h(self.c)
        
         self.h = self.h.flatten()
@@ -208,24 +208,33 @@ class LSTM_unit_legacy:
         self.state = np.hstack(self.h, self.I, self.O)
         return self.state, self.c, self.output_y
 
-    def backward(self, dh, dc, dy):
+    def backward(self, dy):
         """
         In 1997 LSTM, the backward pass only occurs at the last timestep(No error flow through time).
         dh, dc shape : (num_of_memblocks, num_of_cells_per_block, batch_size, H)
-        dy shape : (batch_size, Dout)
+        dy shape : (Dout)
         """
         dh_prev = np.empty_like(dh)
         dc_prev = np.empty_like(dc)
         dinput_x = np.empty_like(self.input_x)
 
         self.dby = np.sum(dy, axis=0)
-        self.dWy = np.matmul(self.concat_h.T, dy)
+        self.dWy = np.matmul(self.h.T, dy)
 
-        dh += np.matmul(dy, self.Wy.T).reshape(dh.shape)
+        dh = np.matmul(dy, self.Wy.T).reshape(dh.shape)
 
-        for i, memblock in enumerate(self.memblocks):
-            dh_prev[i], dc_prev[i], tmp = memblock.backward(dh[i], dc[i])
-            dinput_x += tmp
+        dc = dh * self.O * 2*f.legacy_h(self.c)*(1 - f.legacy_h(self.c))
+        dIG = np.sum(dc.reshape(-1, self.num_of_cell_per_block), axis=1).flatten()
+
+        dO = dh * f.legacy_h(self.c) * self.O * (1 - self.O)
+        
+
+        self.dWi = None
+        self.dWo = None
+        self.dWg = None
+        self.dbi = None
+        self.dbo = None
+        self.dbg = None
 
         return dh_prev, dc_prev, dinput_x
 

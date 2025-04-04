@@ -129,7 +129,7 @@ class LSTM_unit_legacy:
     The first version of LSTM does not have a forget gate, it has only input and output gates
     weights : Wi, Wc, Wo
     """
-    def __init__(self, num_of_cell_per_block, num_of_memblock,
+    def __init__(self, num_of_cell_per_block,
                  Wi, bi,
                  Wo, bo,
                  Wg, bg,
@@ -144,8 +144,7 @@ class LSTM_unit_legacy:
         Wg shape : (16, 4) *(all non-output units, number of cells)
         bg shape : (4) *(number of cells)
         """
-        
-        self.num_of_total_cells = num_of_cell_per_block * num_of_memblock
+
         self.num_of_cell_per_block = num_of_cell_per_block
 
         self.Wi = Wi
@@ -173,12 +172,11 @@ class LSTM_unit_legacy:
         self.c_prev = None
         self.h = None
         self.state = None
-        self.state_prev = None
-        self.input_x = None
+        self.state_input = None
 
         self.output_y = None
 
-        self.I, self.G, self.O = None, None, None, None
+        self.I, self.G, self.O = None, None, None
 
         return
 
@@ -188,55 +186,59 @@ class LSTM_unit_legacy:
         state_prev shape : (8) *(non-in/output units)
         c_prev shape : (num_of_total_cell)
         """
-        self.state_prev = state_prev
+        #self.state_prev = state_prev
         self.c_prev = c_prev
-        self.input_x = input_x
+        #self.input_x = input_x
 
-        state_input = np.hstack(state_prev, input_x)
+        state_prev = state_prev.flatten()
+        input_x = input_x.flatten()
+        self.state_input = np.hstack((state_prev, input_x)) # (16,)
 
-        self.I = f.legacy_f(np.matmul(state_input, self.Wi.T) + self.bi) 
-        self.O = f.legacy_f(np.matmul(state_input, self.Wo.T) + self.bo)
-        self.G = f.legacy_g(np.matmul(state_input, self.Wg.T) + self.bg)
+        self.I = f.legacy_f(np.matmul(self.state_input, self.Wi) + self.bi) # (2)
+        self.O = f.legacy_f(np.matmul(self.state_input, self.Wo) + self.bo)
+        self.G = f.legacy_g(np.matmul(self.state_input, self.Wg) + self.bg)
 
-        IG = self.I * self.G
-        self.c = self.c_prev + np.repeat(IG, self.num_of_cell_per_block)
-        self.h = self.O * f.legacy_h(self.c)
+        Ibroad = np.repeat(self.I, self.num_of_cell_per_block)
+        IG = Ibroad * self.G
+        self.c = self.c_prev + IG
+        self.h = np.repeat(self.O, self.num_of_cell_per_block) * f.legacy_h(self.c)
        
         self.h = self.h.flatten()
+
         self.output_y = np.matmul(self.h, self.Wy) + self.by
         
-        self.state = np.hstack(self.h, self.I, self.O)
+        self.state = np.hstack((self.h, self.I, self.O))
         return self.state, self.c, self.output_y
 
     def backward(self, dy):
         """
         In 1997 LSTM, the backward pass only occurs at the last timestep(No error flow through time).
-        dh, dc shape : (num_of_memblocks, num_of_cells_per_block, batch_size, H)
         dy shape : (Dout)
         """
-        dh_prev = np.empty_like(dh)
-        dc_prev = np.empty_like(dc)
-        dinput_x = np.empty_like(self.input_x)
-
         self.dby = np.sum(dy, axis=0)
-        self.dWy = np.matmul(self.h.T, dy)
+        self.dWy = np.matmul(self.h[np.newaxis,...].T, dy)
 
-        dh = np.matmul(dy, self.Wy.T).reshape(dh.shape)
+        dh = np.matmul(dy, self.Wy.T).flatten()
 
-        dc = dh * self.O * 2*f.legacy_h(self.c)*(1 - f.legacy_h(self.c))
-        dIG = np.sum(dc.reshape(-1, self.num_of_cell_per_block), axis=1).flatten()
+        dc = dh * np.repeat(self.O, self.num_of_cell_per_block) * 2*f.sigmoid(self.c)*(1 - f.sigmoid(self.c))
+        dIG = dc
+        dIbroad = dIG * self.G
+        dIbroad = np.sum(dIbroad.reshape(-1, self.num_of_cell_per_block), axis=1).flatten()
 
-        dO = dh * f.legacy_h(self.c) * self.O * (1 - self.O)
-        
+        dG = dIG * np.repeat(self.I, self.num_of_cell_per_block) * 4 * self.G * (1 - self.G)
+        dO = np.sum((dh * f.legacy_h(self.c)).reshape(-1,self.num_of_cell_per_block), axis=1) * self.O * (1 - self.O)
+        dI = dIbroad * self.I * (1 - self.I)
 
-        self.dWi = None
-        self.dWo = None
-        self.dWg = None
-        self.dbi = None
-        self.dbo = None
-        self.dbg = None
+        self.dWi = np.matmul(self.state_input[...,np.newaxis], dI[np.newaxis,...])
+        self.dWo = np.matmul(self.state_input[...,np.newaxis], dO[np.newaxis,...])
+        self.dWg = np.matmul(self.state_input[...,np.newaxis], dG[np.newaxis,...])
+        self.dbi = np.sum(dI, axis=0)
+        self.dbo = np.sum(dO, axis=0)
+        self.dbg = np.sum(dG, axis=0)
 
-        return dh_prev, dc_prev, dinput_x
+        dstate_input = np.matmul(dI, self.Wi.T) + np.matmul(dO, self.Wo.T) + np.matmul(dG, self.Wg.T)
+        dc_prev = dc
+        return dc_prev, dstate_input
 
 class LSTM_unit_forgetgate:
     """
@@ -332,3 +334,26 @@ class SoftmaxWithLoss_unit:
         dx[np.arange(N), np.argmax(self.target, axis=-1)[np.arange(N)]] -= 1.0
 
         return dx/N
+
+class SEloss_unit:
+    def __init__(self):
+        self.input_x = None
+        self.target = None
+
+    def forward(self, input_x, target):
+        """
+        input_x shape : (Dout)
+        """
+        self.input_x = input_x
+        self.target = target
+
+        loss = (target - input_x)**2
+        loss = np.sum(loss)
+        return loss
+
+    def backward(self, dout=1):
+        """
+        output dx shape : (Dout)
+        """
+        dx = 2*(self.input_x - self.target) * dout
+        return dx

@@ -18,10 +18,10 @@ def sigmoid(x):
 def legacy_f(x):
     return sigmoid(x)
 
-def legacy_g(x):
+def legacy_g(x): # range [-2, 2]
     return 4/(1 + np.exp(-x)) - 2
 
-def legacy_h(x):
+def legacy_h(x): # range [-1, 1]
     return 2 / (1 + np.exp(-x)) - 1
 
 def cross_entropy_error(y, t):

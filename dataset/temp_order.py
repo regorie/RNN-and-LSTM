@@ -22,9 +22,15 @@ def generate_batch(seq_length_range=[100, 110],
     targets = v0 + v1*2
 
     # generate sequence
+    # input labels:
+    # 0, 1 - special values
+    # 2, 3 - start, stop triggers
+    # 4, 5, 6, 7 - normal values
     seq_len = np.random.randint(low=seq_length_range[0], high=seq_length_range[1]+1)
     data = np.random.randint(low=0, high=label_num-4, size=(batch_size, seq_len)) + 4
     data[np.arange(batch_size), p0] = v0
     data[np.arange(batch_size), p1] = v1
+    data[np.arange(batch_size), 0] = 2
+    data[np.arange(batch_size), -1] = 3
 
     return data.T, targets # (batch_size, sequence_length), (batch_size)

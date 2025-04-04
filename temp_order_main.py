@@ -81,6 +81,7 @@ for iter in range(max_iteration//eval_interval):
         hidden_state = model.final_h
         if hasattr(model, "final_c"): cell_state = model.final_c
 
+    correct = 0
     for testiter in range(args.test_iteration):
         test_xs, test_ts = generate_batch(seq_length_range=[100, 110], 
                                         pos0_range=[10, 20],
@@ -88,13 +89,13 @@ for iter in range(max_iteration//eval_interval):
                                         label_num=8,
                                         batch_size=args.test_batch_size)
 
-        correct = 0
         model.reset_state()
         answers = model.predict(test_xs)
         answers = np.argmax(answers,axis=-1)
         for i, seq in enumerate(test_ts):
             if seq == answers[i]: correct += 1
-    acc = correct/test_ts.shape[0]
+    acc = correct/args.test_iteration*args.test_batch_size
+    
     print("Iteration {} Accuracy {}".format(iter*eval_interval, acc))
 
     results.append([acc, loss_sum/eval_interval, norm_sum/eval_interval])

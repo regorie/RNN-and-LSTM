@@ -1,5 +1,6 @@
 import numpy as np
 import functions as f
+from functions import sigmoid
 
 class RNN_unit:
     def __init__(self, Wh, Wx, Wy, bx, by):
@@ -87,9 +88,9 @@ class LSTM_unit:
         self.input_x = input_x
 
         sum_t = np.matmul(input_x, self.Wx) + np.matmul(h_prev, self.Wh) + self.b
-        self.I = f.sigmoid(sum_t[:,    :H]) # 0 - H-1
-        self.F = f.sigmoid(sum_t[:,   H:2*H]) # H - 2H-1
-        self.O = f.sigmoid(sum_t[:, 2*H:3*H]) # 2H - 3H-1
+        self.I = sigmoid.f(sum_t[:,    :H]) # 0 - H-1
+        self.F = sigmoid.f(sum_t[:,   H:2*H]) # H - 2H-1
+        self.O = sigmoid.f(sum_t[:, 2*H:3*H]) # 2H - 3H-1
         self.G = np.tanh(sum_t[:, 3*H:])
 
         self.c = self.F * c_prev + self.G * self.I
@@ -123,7 +124,7 @@ class LSTM_unit:
 
         return dh_prev, dc_prev, dinput_x
 
-class LSTM_unit_legacy:
+class LSTM97_unit:
     """
     From 1997 Long Short Term memory
     The first version of LSTM does not have a forget gate, it has only input and output gates
@@ -157,6 +158,16 @@ class LSTM_unit_legacy:
         self.Wy = Wy
         self.by = by
 
+        self.net_in = None
+        self.net_out = None
+        self.net_cell = None
+        self.net_k = None
+
+        self.ds_in = None
+        self.ds_cell = None
+        self.ds_in_b = None
+        self.ds_cell_b = None
+
         self.dWi = None
         self.dWo = None
         self.dWg = None
@@ -179,66 +190,76 @@ class LSTM_unit_legacy:
         self.I, self.G, self.O = None, None, None
 
         return
-
+    
     def forward(self, input_x, state_prev, c_prev):
-        """
-        input_x shape : (Din)
-        state_prev shape : (8) *(non-in/output units)
-        c_prev shape : (num_of_total_cell)
-        """
-        #self.state_prev = state_prev
-        self.c_prev = c_prev
-        #self.input_x = input_x
-
-        state_prev = state_prev.flatten()
-        input_x = input_x.flatten()
-        self.state_input = np.hstack((state_prev, input_x)) # (16,)
-
-        self.I = f.legacy_f(np.matmul(self.state_input, self.Wi) + self.bi) # (2)
-        self.O = f.legacy_f(np.matmul(self.state_input, self.Wo) + self.bo)
-        self.G = f.legacy_g(np.matmul(self.state_input, self.Wg) + self.bg)
-
-        Ibroad = np.repeat(self.I, self.num_of_cell_per_block)
-        IG = Ibroad * self.G
-        self.c = self.c_prev + IG
-        self.h = np.repeat(self.O, self.num_of_cell_per_block) * f.legacy_h(self.c)
-       
-        self.h = self.h.flatten()
-
-        self.output_y = np.matmul(self.h, self.Wy) + self.by
         
-        self.state = np.hstack((self.h, self.I, self.O))
+        self.c_prev = c_prev.reshape(1, -1)
+        state_prev = state_prev.reshape(1, -1)
+        input_x = input_x.reshape(1, -1)
+        self.state_input = np.hstack((self.c_prev, state_prev, input_x)) # (1, 16)
+        
+        # net input to hidden layer
+        self.net_in = np.dot(self.state_input, self.Wi) + self.bi # (1, 2)
+        self.net_out = np.dot(self.state_input, self.Wo) + self.bo # (1, 2)
+        self.net_cell = np.dot(self.state_input, self.Wg) + self.bg # (1, 4)
+
+        # activations in hidden layer
+        self.I = sigmoid.f(self.net_in) # (1, 2)
+        self.O = sigmoid.f(self.net_out) # (1, 2)
+        tmp = sigmoid.g(self.net_cell)
+        self.c = c_prev + np.repeat(self.I, self.num_of_cell_per_block) * sigmoid.g(self.net_cell) # (1, 4)
+        self.h = np.repeat(self.O, self.num_of_cell_per_block) * sigmoid.h(self.c) # (1, 4)
+
+        # net input and activations of output units
+        self.net_k = np.matmul(self.h, self.Wy) + self.by # (4,) * (4, 4) -> (4,)
+        self.output_y = sigmoid.f(self.net_k)
+
+        # derivatives for input, forget gates and cells
+        ## input gate
+        self.ds_in = self.ds_in + \
+            np.matmul(self.state_input.T, (np.sum(sigmoid.g(self.net_cell).reshape(-1, self.num_of_cell_per_block), axis=1) * sigmoid.df(self.net_in)))
+        self.ds_in_b = self.ds_in_b + \
+            np.sum(sigmoid.g(self.net_cell).reshape(-1, self.num_of_cell_per_block), axis=1) * sigmoid.df(self.net_in)
+
+        ## cells
+        repeat_I = np.repeat(self.I, self.num_of_cell_per_block)
+        self.ds_cell = self.ds_cell + \
+            np.matmul(self.state_input.T, repeat_I * sigmoid.dg(self.net_cell))
+        self.ds_cell_b = self.ds_cell_b + \
+            repeat_I * sigmoid.dg(self.net_cell)
+
+        self.state = np.hstack((self.I, self.O))
         return self.state, self.c, self.output_y
 
-    def backward(self, dy):
-        """
-        In 1997 LSTM, the backward pass only occurs at the last timestep(No error flow through time).
-        dy shape : (Dout)
-        """
-        self.dby = np.sum(dy, axis=0)
-        self.dWy = np.matmul(self.h[np.newaxis,...].T, dy)
+    def backward(self, ek):
+        ## error and deltas
+        # ek = injected error: target - output_y (1, 4)
+        dfy = sigmoid.df(self.net_k) * ek # output unit delta k
 
-        dh = np.matmul(dy, self.Wy.T).flatten()
+        dh = np.matmul(dfy, self.Wy.T)
+        dO = np.sum((dh * sigmoid.h(self.c)).reshape(-1,self.num_of_cell_per_block), axis=1)
+        dnet_out = dO * sigmoid.df(self.net_out) # output gate delta out
 
-        dc = dh * np.repeat(self.O, self.num_of_cell_per_block) * 2*f.sigmoid(self.c)*(1 - f.sigmoid(self.c))
-        dIG = dc
-        dIbroad = dIG * self.G
-        dIbroad = np.sum(dIbroad.reshape(-1, self.num_of_cell_per_block), axis=1).flatten()
+        dc = dh * np.repeat(self.O, self.num_of_cell_per_block) * sigmoid.dh(self.c) # input gate, forget gate es (1, 4)
+        
+        ## weight updates
+        # output units and output gates
+        self.dWy = np.matmul(self.h.T, dfy)
+        self.dby = np.sum(dfy, axis=0)
+        self.dWo = np.dot(self.state_input.T, dnet_out)
+        self.dbo = np.sum(dnet_out, axis=0)
+        
+        # input gates
+        dc_sum = np.sum(dc.reshape(-1, self.num_of_cell_per_block), axis=1)
+        self.dWi = dc_sum[np.arange(self.Wi.shape[-1])] * self.ds_in[:,np.arange(self.Wi.shape[-1])]
+        #self.dbi = np.sum(self.ds_in_b, axis=0)
+        self.dbi = np.zeros_like(self.bi)
 
-        dG = dIG * np.repeat(self.I, self.num_of_cell_per_block) * 4 * self.G * (1 - self.G)
-        dO = np.sum((dh * f.legacy_h(self.c)).reshape(-1,self.num_of_cell_per_block), axis=1) * self.O * (1 - self.O)
-        dI = dIbroad * self.I * (1 - self.I)
-
-        self.dWi = np.matmul(self.state_input[...,np.newaxis], dI[np.newaxis,...])
-        self.dWo = np.matmul(self.state_input[...,np.newaxis], dO[np.newaxis,...])
-        self.dWg = np.matmul(self.state_input[...,np.newaxis], dG[np.newaxis,...])
-        self.dbi = np.sum(dI, axis=0)
-        self.dbo = np.sum(dO, axis=0)
-        self.dbg = np.sum(dG, axis=0)
-
-        dstate_input = np.matmul(dI, self.Wi.T) + np.matmul(dO, self.Wo.T) + np.matmul(dG, self.Wg.T)
-        dc_prev = dc
-        return dc_prev, dstate_input
+        # cells
+        self.dWg = dc * self.ds_cell
+        #self.dbg = np.sum(self.ds_cell_b, axis=0)
+        self.dbg = np.zeros_like(self.bg)
+        return
 
 class LSTM_unit_forgetgate:
     """
@@ -278,9 +299,9 @@ class LSTM_unit_forgetgate:
         self.input_x = input_x
 
         sum_t = np.matmul(input_x, self.Wx) + np.matmul(h_prev, self.Wh) + self.b
-        self.I = f.sigmoid(sum_t[:,    :H]) # 0 - H-1
-        self.F = f.sigmoid(sum_t[:,   H:2*H]) # H - 2H-1
-        self.O = f.sigmoid(sum_t[:, 2*H:3*H]) # 2H - 3H-1
+        self.I = sigmoid.f(sum_t[:,    :H]) # 0 - H-1
+        self.F = sigmoid.f(sum_t[:,   H:2*H]) # H - 2H-1
+        self.O = sigmoid.f(sum_t[:, 2*H:3*H]) # 2H - 3H-1
         self.G = np.tanh(sum_t[:, 3*H:])
 
         self.c = self.F * c_prev + self.G * self.I
@@ -348,12 +369,12 @@ class SEloss_unit:
         self.target = target
 
         loss = (target - input_x)**2
-        loss = np.sum(loss)
+        loss = np.sum(loss) / 2
         return loss
 
     def backward(self, dout=1):
         """
         output dx shape : (Dout)
         """
-        dx = 2*(self.input_x - self.target) * dout
+        dx = -(self.target - self.input_x) * dout
         return dx

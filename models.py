@@ -189,8 +189,8 @@ class LSTM97_manyToOne:
         self.wo = np.random.uniform(low=-scale, high=scale, size=(self.num_total_unit+nin, num_block))
         self.wg = np.random.uniform(low=-scale, high=scale, size=(self.num_total_unit+nin, self.num_total_cell))
         self.wy = np.random.uniform(low=-scale, high=scale, size=(self.num_total_cell, nout))
-        self.bi = np.array([-2, -4])
-        self.bo = np.random.uniform(low=-0.1, high=0.1, size=(2))
+        self.bi = np.array([-2.0, -4.0])
+        self.bo = np.random.uniform(low=-scale, high=scale, size=(2))
         self.bg = np.zeros((self.num_total_cell))
         self.by = np.zeros((nout))
         embed_outW = np.eye(nout).astype('f')
@@ -201,7 +201,7 @@ class LSTM97_manyToOne:
         # set layer
         self.embed_W = embed_W
         self.embed_outW = embed_outW
-        self.lstm_layer = layers.LSTM_unit_legacy(self.num_cell_per_block,
+        self.lstm_layer = layers.LSTM97_unit(self.num_cell_per_block,
                                                 self.wi, self.bi, self.wo, self.bo,
                                                 self.wg, self.bg, self.wy, self.by)
         self.loss_layer = layers.SEloss_unit()
@@ -218,12 +218,21 @@ class LSTM97_manyToOne:
         embedded_input = self.embed_W[input_xs]
         embedded_target = self.embed_outW[targets]
 
-        if self.c_prev is None:
-            self.state_prev = np.zeros((self.num_total_unit,))
-            self.c_prev = np.zeros((self.num_total_cell,))
+        #if self.state_prev is None:
+        self.state_prev = np.zeros((self.num_total_unit-self.num_total_cell,))
+        
+        # reset states at start of each sequence
+        self.lstm_layer.ds_in = np.zeros_like(self.wi)
+        self.lstm_layer.ds_cell = np.zeros_like(self.wg)
+        self.lstm_layer.ds_in_b = np.zeros_like(self.bi)
+        self.lstm_layer.ds_cell_b = np.zeros_like(self.bg)
+        self.c_prev = np.zeros((self.num_total_cell,))
+
+        pass
 
         for t in range(T):
             self.state_prev, self.c_prev, output = self.lstm_layer.forward(embedded_input[t], self.state_prev, self.c_prev)
+            print(t, self.lstm_layer.I, self.lstm_layer.net_cell, self.c_prev)
 
         loss = self.loss_layer.forward(output, embedded_target)
         return loss
@@ -231,6 +240,8 @@ class LSTM97_manyToOne:
     def predict(self, input_xs):
         T = input_xs.shape[0]
         embedded_input = self.embed_W[input_xs]
+        self.state_prev = np.zeros((self.num_total_unit-self.num_total_cell,))
+        self.c_prev = np.zeros((self.num_total_cell,))
 
         for t in range(T):
             self.state_prev, self.c_prev, output = self.lstm_layer.forward(embedded_input[t], self.state_prev, self.c_prev)
@@ -239,25 +250,23 @@ class LSTM97_manyToOne:
 
     def backward(self, dout=1):
         
-        grads = [np.zeros_like(self.wi), np.zeros_like(self.wo),
-                 np.zeros_like(self.wg), np.zeros_like(self.wy),
-                 np.zeros_like(self.bi), np.zeros_like(self.bo),
-                 np.zeros_like(self.bg), np.zeros_like(self.by)]
+        grads = []
         
         dy = self.loss_layer.backward(dout)
 
-        dc_prev, dstate_input = self.lstm_layer.backward(dy)
+        dc_prev = self.lstm_layer.backward(dy)
 
-        grads[0] += self.lstm_layer.dWi
-        grads[1] += self.lstm_layer.dWo
-        grads[2] += self.lstm_layer.dWg
-        grads[3] += self.lstm_layer.dWy
-        grads[4] += self.lstm_layer.dbi
-        grads[5] += self.lstm_layer.dbo
-        grads[6] += self.lstm_layer.dbg
-        grads[7] += self.lstm_layer.dby
+        grads.append(self.lstm_layer.dWi)
+        grads.append(self.lstm_layer.dWo)
+        grads.append(self.lstm_layer.dWg)
+        grads.append(self.lstm_layer.dWy)
+        grads.append(self.lstm_layer.dbi)
+        grads.append(self.lstm_layer.dbo)
+        grads.append(self.lstm_layer.dbg)
+        grads.append(self.lstm_layer.dby)
 
         return grads
 
     def reset_state(self):
-        pass
+        self.state_prev = np.zeros((self.num_total_unit-self.num_total_cell,))
+        return

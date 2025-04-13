@@ -12,7 +12,7 @@ import matplotlib.pyplot as plt
 from clip_grad import clip_grads
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--exp_no", "-en", type=int, required=True)
+parser.add_argument("--exp_no", "-en", type=int, required=False)
 parser.add_argument("--evalinterval", '-ei', type=int, default=20)
 parser.add_argument("--saveparams", '-sp', type=int, default=1)
 parser.add_argument("--sequence_length", '-sq', type=int, default=25)
@@ -58,6 +58,7 @@ optimizer = SGD(optimizer_params)
 results = []
 norm_sum = 0.0
 loss_sum = 0.0
+wi_grad = []
 start = time.time()
 for iter in range(max_iteration//eval_interval):
     for inneriter in range(eval_interval):
@@ -70,6 +71,7 @@ for iter in range(max_iteration//eval_interval):
 
         loss_sum += model.forward(train_xs, train_ts)
         grads = model.backward()
+        wi_grad.append([np.sum(grads[0]**2)])
 
         if args.clip_grad > 0.0:
             norm_sum += clip_grads(grads, args.clip_grad)
@@ -77,10 +79,6 @@ for iter in range(max_iteration//eval_interval):
         optimizer.update(grads, model.params)
 
     ##### evaluate #####
-    if args.state_reset == 2:
-        hidden_state = model.final_h
-        if hasattr(model, "final_c"): cell_state = model.final_c
-
     correct = 0
     for testiter in range(args.test_iteration):
         test_xs, test_ts = generate_batch(seq_length_range=[100, 110], 
@@ -89,7 +87,6 @@ for iter in range(max_iteration//eval_interval):
                                         label_num=8,
                                         batch_size=args.test_batch_size)
 
-        model.reset_state()
         answers = model.predict(test_xs)
         answers = np.argmax(answers,axis=-1)
         for i, seq in enumerate(test_ts):
@@ -102,12 +99,8 @@ for iter in range(max_iteration//eval_interval):
     loss_sum = 0.0
     norm_sum = 0.0
 
-    if acc >= 0.99 : break
+    if acc >= args.target_accuracy : break
 
-    model.reset_state()
-    if args.state_reset== 2:
-        model.final_h = hidden_state
-        if hasattr(model, "final_c"): model.final_c = cell_state
 
 end = time.time()
 print("total time taken: ", end-start)
@@ -116,6 +109,10 @@ print("total time taken: ", end-start)
 with open('./Result/results({}).csv'.format(args.exp_no), 'w+', newline='') as f:
     write = csv.writer(f)
     write.writerows(results)
+
+with open('./Result/results_wi({}).csv'.format(args.exp_no), 'w+', newline='') as f:
+    write = csv.writer(f)
+    write.writerows(wi_grad)
 
 if args.saveparams == 1:
     params = model.params

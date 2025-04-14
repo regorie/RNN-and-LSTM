@@ -17,7 +17,7 @@ parser.add_argument("--evalinterval", '-ei', type=int, default=20)
 parser.add_argument("--saveparams", '-sp', type=int, default=1)
 parser.add_argument("--sequence_length", '-sq', type=int, default=25)
 parser.add_argument("--state_reset", '-srt', type=int, default=1)
-parser.add_argument("--iteration", '-iter', type=int, default=10)
+parser.add_argument("--iteration", '-iter', type=int, default=100)
 parser.add_argument("--test_iteration", '-titer', type=int, default=2560)
 parser.add_argument("--batch_size", '-bs', type=int, default=20)
 parser.add_argument("--test_batch_size", '-tbs', type=int, default=10000)
@@ -58,7 +58,6 @@ optimizer = SGD(optimizer_params)
 results = []
 norm_sum = 0.0
 loss_sum = 0.0
-wi_grad = []
 start = time.time()
 for iter in range(max_iteration//eval_interval):
     for inneriter in range(eval_interval):
@@ -69,9 +68,10 @@ for iter in range(max_iteration//eval_interval):
                                             label_num=8,
                                             batch_size=batch_size)
 
-        loss_sum += model.forward(train_xs, train_ts)
+        loss = model.forward(train_xs, train_ts)
+        loss_sum += loss
+
         grads = model.backward()
-        wi_grad.append([np.sum(grads[0]**2)])
 
         if args.clip_grad > 0.0:
             norm_sum += clip_grads(grads, args.clip_grad)
@@ -109,10 +109,6 @@ print("total time taken: ", end-start)
 with open('./Result/results({}).csv'.format(args.exp_no), 'w+', newline='') as f:
     write = csv.writer(f)
     write.writerows(results)
-
-with open('./Result/results_wi({}).csv'.format(args.exp_no), 'w+', newline='') as f:
-    write = csv.writer(f)
-    write.writerows(wi_grad)
 
 if args.saveparams == 1:
     params = model.params

@@ -9,8 +9,8 @@ def generate_batch(seq_length_range=[100, 110],
                    batch_size=1):
 
     # set positions
-    p0 = np.random.randint(low=pos0_range[0], high=pos0_range[1]+1, size=(batch_size))
-    p1 = np.random.randint(low=pos1_range[0], high=pos1_range[1]+1, size=(batch_size))
+    p0 = np.random.randint(low=pos0_range[0], high=pos0_range[1], size=(batch_size))
+    p1 = np.random.randint(low=pos1_range[0], high=pos1_range[1], size=(batch_size))
 
     # set special values
     v0 = np.random.randint(low=0, high=2, size=(batch_size,))

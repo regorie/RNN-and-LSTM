@@ -19,11 +19,11 @@ class sigmoid: # range [-2, 2]
         return 1 / (1 + np.exp(-x))
     
     @staticmethod
-    def g(x):  # range [-1, 1]
+    def h(x):  # range [-1, 1]
         return 2 / (1 + np.exp(-x)) - 1
     
     @staticmethod
-    def h(x): # range[-2, 2]
+    def g(x): # range[-2, 2]
         return 4 / (1 + np.exp(-x)) - 2
     
     @staticmethod
@@ -32,12 +32,12 @@ class sigmoid: # range [-2, 2]
         return f * (1 - f)
     
     @staticmethod
-    def dg(x):
+    def dh(x):
         f = 1 / (1 + np.exp(-x))
         return 2 * f * (1 - f)
     
     @staticmethod
-    def dh(x):
+    def dg(x):
         f = 1 / (1 + np.exp(-x))
         return 4 * f * (1 - f)
 

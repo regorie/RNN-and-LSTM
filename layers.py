@@ -199,15 +199,15 @@ class LSTM97_unit:
         self.state_input = np.hstack((self.c_prev, state_prev, input_x)) # (1, 16)
         
         # net input to hidden layer
-        self.net_in = np.dot(self.state_input, self.Wi) + self.bi # (1, 2)
-        self.net_out = np.dot(self.state_input, self.Wo) + self.bo # (1, 2)
-        self.net_cell = np.dot(self.state_input, self.Wg) + self.bg # (1, 4)
+        self.net_in = np.matmul(self.state_input, np.repeat(self.Wi, self.num_of_cell_per_block, axis=1)) + np.repeat(self.bi,self.num_of_cell_per_block) # (1, 4)
+        self.net_out = np.matmul(self.state_input, self.Wo) + self.bo # (1, 2)
+        self.net_cell = np.matmul(self.state_input, self.Wg) + self.bg # (1, 4)
 
         # activations in hidden layer
-        self.I = sigmoid.f(self.net_in) # (1, 2)
+        self.I = sigmoid.f(self.net_in) # (1, 4)
         self.O = sigmoid.f(self.net_out) # (1, 2)
-        tmp = sigmoid.g(self.net_cell)
-        self.c = c_prev + np.repeat(self.I, self.num_of_cell_per_block) * sigmoid.g(self.net_cell) # (1, 4)
+
+        self.c = c_prev + self.I * sigmoid.g(self.net_cell) # (1, 4)
         self.h = np.repeat(self.O, self.num_of_cell_per_block) * sigmoid.h(self.c) # (1, 4)
 
         # net input and activations of output units
@@ -217,23 +217,22 @@ class LSTM97_unit:
         # derivatives for input, forget gates and cells
         ## input gate
         self.ds_in = self.ds_in + \
-            np.matmul(self.state_input.T, (np.sum(sigmoid.g(self.net_cell).reshape(-1, self.num_of_cell_per_block), axis=1) * sigmoid.df(self.net_in)))
+            np.matmul(self.state_input.T, (sigmoid.g(self.net_cell) * sigmoid.df(self.net_in)))
         self.ds_in_b = self.ds_in_b + \
-            np.sum(sigmoid.g(self.net_cell).reshape(-1, self.num_of_cell_per_block), axis=1) * sigmoid.df(self.net_in)
+            (sigmoid.g(self.net_cell) * sigmoid.df(self.net_in))
 
         ## cells
-        repeat_I = np.repeat(self.I, self.num_of_cell_per_block)
         self.ds_cell = self.ds_cell + \
-            np.matmul(self.state_input.T, repeat_I * sigmoid.dg(self.net_cell))
+            np.matmul(self.state_input.T, self.I * sigmoid.dg(self.net_cell))
         self.ds_cell_b = self.ds_cell_b + \
-            repeat_I * sigmoid.dg(self.net_cell)
+            self.I * sigmoid.dg(self.net_cell)
 
-        self.state = np.hstack((self.I, self.O))
+        self.state = np.hstack((np.sum(self.I.reshape(-1, self.num_of_cell_per_block), axis=1).reshape(1,-1), self.O))
         return self.state, self.c, self.output_y
 
     def backward(self, ek):
         ## error and deltas
-        # ek = injected error: target - output_y (1, 4)
+        # ek = injected error
         dfy = sigmoid.df(self.net_k) * ek # output unit delta k
 
         dh = np.matmul(dfy, self.Wy.T)
@@ -250,15 +249,13 @@ class LSTM97_unit:
         self.dbo = np.sum(dnet_out, axis=0)
         
         # input gates
-        dc_sum = np.sum(dc.reshape(-1, self.num_of_cell_per_block), axis=1)
-        self.dWi = dc_sum[np.arange(self.Wi.shape[-1])] * self.ds_in[:,np.arange(self.Wi.shape[-1])]
-        #self.dbi = np.sum(self.ds_in_b, axis=0)
-        self.dbi = np.zeros_like(self.bi)
+        self.dWi = np.sum((dc * self.ds_in).reshape(-1, self.num_of_cell_per_block), axis=1).reshape(-1, self.num_of_cell_per_block)
+        self.dbi = np.sum((dc * self.ds_in_b).reshape(-1, self.num_of_cell_per_block), axis=1).reshape(1, -1).flatten()
 
         # cells
         self.dWg = dc * self.ds_cell
-        #self.dbg = np.sum(self.ds_cell_b, axis=0)
-        self.dbg = np.zeros_like(self.bg)
+        self.dbg = (dc * np.sum(self.ds_cell_b, axis=0)).flatten()
+
         return
 
 class LSTM_unit_forgetgate:
@@ -358,17 +355,17 @@ class SoftmaxWithLoss_unit:
 
 class SEloss_unit:
     def __init__(self):
-        self.input_x = None
+        self.output_y = None
         self.target = None
 
-    def forward(self, input_x, target):
+    def forward(self, output_y, target):
         """
         input_x shape : (Dout)
         """
-        self.input_x = input_x
+        self.output_y = output_y
         self.target = target
 
-        loss = (target - input_x)**2
+        loss = (target - output_y)**2
         loss = np.sum(loss) / 2
         return loss
 
@@ -376,5 +373,5 @@ class SEloss_unit:
         """
         output dx shape : (Dout)
         """
-        dx = -(self.target - self.input_x) * dout
+        dx = (self.target - self.output_y)
         return dx

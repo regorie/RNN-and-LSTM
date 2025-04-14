@@ -189,10 +189,11 @@ class LSTM97_manyToOne:
         self.wo = np.random.uniform(low=-scale, high=scale, size=(self.num_total_unit+nin, num_block))
         self.wg = np.random.uniform(low=-scale, high=scale, size=(self.num_total_unit+nin, self.num_total_cell))
         self.wy = np.random.uniform(low=-scale, high=scale, size=(self.num_total_cell, nout))
-        self.bi = np.array([-2.0, -4.0])
-        self.bo = np.random.uniform(low=-scale, high=scale, size=(2))
-        self.bg = np.zeros((self.num_total_cell))
-        self.by = np.zeros((nout))
+        self.bi = np.array([-2.0, -4.0]) # (논문에 제시)
+        self.bo = np.array([-0.04, 0.08])
+        #self.bo = np.random.uniform(low=-scale, high=scale, size=(2)) # (논문에 제시)
+        self.bg = np.random.uniform(low=-scale, high=scale, size=(self.num_total_cell))
+        self.by = np.random.uniform(low=-scale, high=scale, size=(nout))
         embed_outW = np.eye(nout).astype('f')
 
         self.params = [self.wi, self.wo, self.wg, self.wy,
@@ -222,9 +223,9 @@ class LSTM97_manyToOne:
         self.state_prev = np.zeros((self.num_total_unit-self.num_total_cell,))
         
         # reset states at start of each sequence
-        self.lstm_layer.ds_in = np.zeros_like(self.wi)
+        self.lstm_layer.ds_in = np.zeros_like(self.wg)
         self.lstm_layer.ds_cell = np.zeros_like(self.wg)
-        self.lstm_layer.ds_in_b = np.zeros_like(self.bi)
+        self.lstm_layer.ds_in_b = np.zeros_like(self.bg)
         self.lstm_layer.ds_cell_b = np.zeros_like(self.bg)
         self.c_prev = np.zeros((self.num_total_cell,))
 
@@ -232,7 +233,7 @@ class LSTM97_manyToOne:
 
         for t in range(T):
             self.state_prev, self.c_prev, output = self.lstm_layer.forward(embedded_input[t], self.state_prev, self.c_prev)
-            print(t, self.lstm_layer.I, self.lstm_layer.net_cell, self.c_prev)
+            #print(t, self.lstm_layer.I, self.lstm_layer.net_cell, self.c_prev)
 
         loss = self.loss_layer.forward(output, embedded_target)
         return loss

@@ -6,4 +6,4 @@ class SGD:
 
     def update(self, grads, params):
         for i, param in enumerate(params):
-            param += self.lr * grads[i]
+            param -= self.lr * grads[i]

@@ -208,6 +208,7 @@ class LSTM97_manyToOne:
         self.loss_layer = layers.SEloss_unit()
 
         self.c_prev = None
+        self.h_prev = None
         self.state_prev = None
     
     def forward(self, input_xs, targets):
@@ -228,11 +229,12 @@ class LSTM97_manyToOne:
         self.lstm_layer.ds_in_b = np.zeros_like(self.bg)
         self.lstm_layer.ds_cell_b = np.zeros_like(self.bg)
         self.c_prev = np.zeros((self.num_total_cell,))
+        self.h_prev = np.zeros((self.num_total_cell,))
 
         pass
 
         for t in range(T):
-            self.state_prev, self.c_prev, output = self.lstm_layer.forward(embedded_input[t], self.state_prev, self.c_prev)
+            self.state_prev, self.c_prev, self.h_prev, output = self.lstm_layer.forward(embedded_input[t], self.state_prev, self.c_prev, self.h_prev)
             #print(t, self.lstm_layer.I, self.lstm_layer.net_cell, self.c_prev)
 
         loss = self.loss_layer.forward(output, embedded_target)
@@ -243,9 +245,10 @@ class LSTM97_manyToOne:
         embedded_input = self.embed_W[input_xs]
         self.state_prev = np.zeros((self.num_total_unit-self.num_total_cell,))
         self.c_prev = np.zeros((self.num_total_cell,))
+        self.h_prev = np.zeros((self.num_total_cell,))
 
         for t in range(T):
-            self.state_prev, self.c_prev, output = self.lstm_layer.forward(embedded_input[t], self.state_prev, self.c_prev)
+            self.state_prev, self.c_prev, self.h_prev, output = self.lstm_layer.forward(embedded_input[t], self.state_prev, self.c_prev, self.h_prev)
 
         return [output]
 

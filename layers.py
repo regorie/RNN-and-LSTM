@@ -180,23 +180,20 @@ class LSTM97_unit:
 
         # cache
         self.c = None
-        self.c_prev = None
         self.h = None
-        self.state = None
         self.state_input = None
-
-        self.output_y = None
 
         self.I, self.G, self.O = None, None, None
 
         return
     
-    def forward(self, input_x, state_prev, c_prev):
+    def forward(self, input_x, state_prev, c_prev, h_prev):
         
-        self.c_prev = c_prev.reshape(1, -1)
+        c_prev = c_prev.reshape(1, -1)
+        h_prev = h_prev.reshape(1, -1)
         state_prev = state_prev.reshape(1, -1)
         input_x = input_x.reshape(1, -1)
-        self.state_input = np.hstack((self.c_prev, state_prev, input_x)) # (1, 16)
+        self.state_input = np.hstack((h_prev, state_prev, input_x)) # (1, 16)
         
         # net input to hidden layer
         self.net_in = np.matmul(self.state_input, np.repeat(self.Wi, self.num_of_cell_per_block, axis=1)) + np.repeat(self.bi,self.num_of_cell_per_block) # (1, 4)
@@ -212,7 +209,7 @@ class LSTM97_unit:
 
         # net input and activations of output units
         self.net_k = np.matmul(self.h, self.Wy) + self.by # (4,) * (4, 4) -> (4,)
-        self.output_y = sigmoid.f(self.net_k)
+        output_y = sigmoid.f(self.net_k)
 
         # derivatives for input, forget gates and cells
         ## input gate
@@ -227,8 +224,8 @@ class LSTM97_unit:
         self.ds_cell_b = self.ds_cell_b + \
             self.I * sigmoid.dg(self.net_cell)
 
-        self.state = np.hstack((np.sum(self.I.reshape(-1, self.num_of_cell_per_block), axis=1).reshape(1,-1), self.O))
-        return self.state, self.c, self.output_y
+        state = np.hstack((np.sum(self.I.reshape(-1, self.num_of_cell_per_block), axis=1).reshape(1,-1), self.O))
+        return state, self.c, self.h, output_y
 
     def backward(self, ek):
         ## error and deltas
@@ -373,5 +370,5 @@ class SEloss_unit:
         """
         output dx shape : (Dout)
         """
-        dx = (self.target - self.output_y)
+        dx = -(self.target - self.output_y)
         return dx

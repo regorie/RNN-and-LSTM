@@ -53,6 +53,8 @@ elif args.model == 'LSTM':
     model = LSTM_manyToOne(nin=8, nout=4, hidden_size=50, scale=0.1, stateful=stateful, seed=args.seed)
 elif args.model == 'LSTM97':
     model = LSTM97_manyToOne(nin=8, nout=4, num_block=2, num_cell_per_block=2, all_label=8, scale=0.1, seed=args.seed)
+elif args.model == 'LSTMforget':
+    model = LSTMforget_manyToOne(nin=8, nout=4, num_block=2, num_cell_per_block=2, all_label=8, scale=0.1, seed=args.seed)
 optimizer = SGD(optimizer_params)
 
 results = []
@@ -95,7 +97,7 @@ for iter in range(max_iteration//eval_interval):
     
     print("Iteration {} Accuracy {}".format(iter*eval_interval, acc))
 
-    results.append([acc, loss_sum/eval_interval, norm_sum/eval_interval])
+    results.append([acc, correct, loss_sum/eval_interval, norm_sum/eval_interval])
     loss_sum = 0.0
     norm_sum = 0.0
 

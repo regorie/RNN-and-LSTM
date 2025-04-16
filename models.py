@@ -231,8 +231,6 @@ class LSTM97_manyToOne:
         self.c_prev = np.zeros((self.num_total_cell,))
         self.h_prev = np.zeros((self.num_total_cell,))
 
-        pass
-
         for t in range(T):
             self.state_prev, self.c_prev, self.h_prev, output = self.lstm_layer.forward(embedded_input[t], self.state_prev, self.c_prev, self.h_prev)
             #print(t, self.lstm_layer.I, self.lstm_layer.net_cell, self.c_prev)
@@ -266,6 +264,111 @@ class LSTM97_manyToOne:
         grads.append(self.lstm_layer.dWy)
         grads.append(self.lstm_layer.dbi)
         grads.append(self.lstm_layer.dbo)
+        grads.append(self.lstm_layer.dbg)
+        grads.append(self.lstm_layer.dby)
+
+        return grads
+
+    def reset_state(self):
+        self.state_prev = np.zeros((self.num_total_unit-self.num_total_cell,))
+        return
+    
+class LSTMforget_manyToOne:
+    def __init__(self, nin, nout, num_block, num_cell_per_block, all_label=8, scale=0.1, seed=None):
+        if seed is not None:
+            np.random.seed(seed)
+
+        self.num_total_cell = num_block * num_cell_per_block
+        self.num_total_unit = num_block * 3 + self.num_total_cell
+        self.num_cell_per_block = num_cell_per_block
+        
+        # set weight parameters
+        embed_W = np.eye(all_label).astype('f')
+        self.wi = np.random.uniform(low=-scale, high=scale, size=(self.num_total_unit+nin, num_block))
+        self.wo = np.random.uniform(low=-scale, high=scale, size=(self.num_total_unit+nin, num_block))
+        self.wf = np.random.uniform(low=-scale, high=scale, size=(self.num_total_unit+nin, num_block))
+        self.wg = np.random.uniform(low=-scale, high=scale, size=(self.num_total_unit+nin, self.num_total_cell))
+        self.wy = np.random.uniform(low=-scale, high=scale, size=(self.num_total_cell, nout))
+        self.bi = np.array([-2.0, -4.0]) # (논문에 제시)
+        self.bo = np.array([-0.04, 0.08])
+        self.bf = np.array([5.0, 5.0])
+        #self.bo = np.random.uniform(low=-scale, high=scale, size=(2)) # (논문에 제시)
+        self.bg = np.random.uniform(low=-scale, high=scale, size=(self.num_total_cell))
+        self.by = np.random.uniform(low=-scale, high=scale, size=(nout))
+        embed_outW = np.eye(nout).astype('f')
+
+        self.params = [self.wi, self.wo, self.wf, self.wg, self.wy,
+                       self.bi, self.bo, self.bf, self.bg, self.by]
+
+        # set layer
+        self.embed_W = embed_W
+        self.embed_outW = embed_outW
+        self.lstm_layer = layers.LSTMforget_unit(self.num_cell_per_block,
+                                                self.wi, self.bi, self.wo, self.bo,
+                                                self.wg, self.bg, self.wf, self.bf, self.wy, self.by)
+        self.loss_layer = layers.SEloss_unit()
+
+        self.c_prev = None
+        self.h_prev = None
+        self.state_prev = None
+    
+    def forward(self, input_xs, targets):
+        """
+        input_xs shape : (T) *(length of the sequence, in labels)
+        targets shape :(1,) *target label
+        """
+        T = input_xs.shape[0]
+        embedded_input = self.embed_W[input_xs]
+        embedded_target = self.embed_outW[targets]
+
+        #if self.state_prev is None:
+        self.state_prev = np.zeros((self.num_total_unit-self.num_total_cell,))
+        
+        # reset states at start of each sequence
+        self.lstm_layer.ds_in = np.zeros_like(self.wg)
+        self.lstm_layer.ds_cell = np.zeros_like(self.wg)
+        self.lstm_layer.ds_forget = np.zeros_like(self.wg)
+        self.lstm_layer.ds_in_b = np.zeros_like(self.bg)
+        self.lstm_layer.ds_cell_b = np.zeros_like(self.bg)
+        self.lstm_layer.ds_forget_b = np.zeros_like(self.bg)
+        self.c_prev = np.zeros((self.num_total_cell,))
+        self.h_prev = np.zeros((self.num_total_cell,))
+
+        for t in range(T):
+            self.state_prev, self.c_prev, self.h_prev, output = self.lstm_layer.forward(embedded_input[t], self.state_prev, self.c_prev, self.h_prev)
+            #print(t, self.lstm_layer.I, self.lstm_layer.net_cell, self.c_prev)
+
+        loss = self.loss_layer.forward(output, embedded_target)
+        return loss
+    
+    def predict(self, input_xs):
+        T = input_xs.shape[0]
+        embedded_input = self.embed_W[input_xs]
+        self.state_prev = np.zeros((self.num_total_unit-self.num_total_cell,))
+        self.c_prev = np.zeros((self.num_total_cell,))
+        self.h_prev = np.zeros((self.num_total_cell,))
+
+        for t in range(T):
+            self.state_prev, self.c_prev, self.h_prev, output = self.lstm_layer.forward(embedded_input[t], self.state_prev, self.c_prev, self.h_prev)
+
+        return [output]
+
+    def backward(self, dout=1):
+        
+        grads = []
+        
+        dy = self.loss_layer.backward(dout)
+
+        dc_prev = self.lstm_layer.backward(dy)
+
+        grads.append(self.lstm_layer.dWi)
+        grads.append(self.lstm_layer.dWo)
+        grads.append(self.lstm_layer.dWf)
+        grads.append(self.lstm_layer.dWg)
+        grads.append(self.lstm_layer.dWy)
+        grads.append(self.lstm_layer.dbi)
+        grads.append(self.lstm_layer.dbo)
+        grads.append(self.lstm_layer.dbf)
         grads.append(self.lstm_layer.dbg)
         grads.append(self.lstm_layer.dby)
 

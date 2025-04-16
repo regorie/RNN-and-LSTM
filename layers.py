@@ -255,58 +255,157 @@ class LSTM97_unit:
 
         return
 
-class LSTM_unit_forgetgate:
+class LSTMforget_unit:
     """
-    From 2000 Learning to forget
+    From 2000 Learning to forget: Continual Prediction with LSTM
     Forget gate was introduced to the cell.
     weights : Wi, Wc, Wo, Wf
     """
-    def __init__(self, num_of_cell, num_of_memblock,
-                 Wh, Wx, b,
+    def __init__(self, num_of_cell_per_block,
+                 Wi, bi,
+                 Wo, bo,
+                 Wg, bg,
+                 Wf, bf,
                  Wy, by):
-        self.Wh = Wh
-        self.Wx = Wx
-        self.b = b
+        """
+        Wi shape : (16, 2) *(all non-output units, number of all input gates)
+        bi shape : (2) *(number of all input gates)
+        Wo shape : (16, 2) *(all non-output units, number of all output gates)
+        bo shape : (2) *(number of all output gates)
+        Wf shape : (16, 2) *(all non-output units, number of all forget gates)
+        bf shape : (2) *(number of all forget gates)
+        Wy shape : (4, 4) *(number of hidden states, all output units)
+        by shape : (4) *(all output units)
+        Wg shape : (16, 4) *(all non-output units, number of cells)
+        bg shape : (4) *(number of cells)
+        """
+        self.num_of_cell_per_block = num_of_cell_per_block
+
+        self.Wi = Wi
+        self.Wo = Wo
+        self.Wg = Wg
+        self.Wf = Wf
+        self.bi = bi
+        self.bo = bo
+        self.bg = bg
+        self.bf = bf
+
         self.Wy = Wy
         self.by = by
 
-        self.dWh = None
-        self.dWx = None
-        self.db = None
+        self.net_in = None
+        self.net_out = None
+        self.net_forget = None
+        self.net_cell = None
+        self.net_k = None
+
+        self.ds_in = None
+        self.ds_cell = None
+        self.ds_forget = None
+        self.ds_in_b = None
+        self.ds_cell_b = None
+        self.ds_forget_b = None
+
+        self.dWi = None
+        self.dWo = None
+        self.dWg = None
+        self.dWf = None
+        self.dbi = None
+        self.dbo = None
+        self.dbg = None
+        self.dbf = None
+
         self.dWy = None
         self.dby = None
 
         # cache
         self.c = None
         self.h = None
-        self.h_prev = None
-        self.c_prev = None
-        self.input_x = None
-        self.output_y = None
+        self.state_input = None
 
-        self.I, self.G, self.F, self.O = None, None, None, None
+        self.I, self.G, self.O, self.F = None, None, None, None
 
-    def forward(self, input_x, h_prev, c_prev):
-        N, H = h_prev.shape
-        self.h_prev = h_prev
-        self.c_prev = c_prev
-        self.input_x = input_x
+        return
 
-        sum_t = np.matmul(input_x, self.Wx) + np.matmul(h_prev, self.Wh) + self.b
-        self.I = sigmoid.f(sum_t[:,    :H]) # 0 - H-1
-        self.F = sigmoid.f(sum_t[:,   H:2*H]) # H - 2H-1
-        self.O = sigmoid.f(sum_t[:, 2*H:3*H]) # 2H - 3H-1
-        self.G = np.tanh(sum_t[:, 3*H:])
+    def forward(self, input_x, state_prev, c_prev, h_prev):
+        
+        c_prev = c_prev.reshape(1, -1)
+        h_prev = h_prev.reshape(1, -1)
+        state_prev = state_prev.reshape(1, -1)
+        input_x = input_x.reshape(1, -1)
+        self.state_input = np.hstack((h_prev, state_prev, input_x)) # (1, 16)
+        
+        # net input to hidden layer
+        self.net_in = np.matmul(self.state_input, np.repeat(self.Wi, self.num_of_cell_per_block, axis=1)) + np.repeat(self.bi,self.num_of_cell_per_block) # (1, 4)
+        self.net_forget = np.matmul(self.state_input, np.repeat(self.Wf, self.num_of_cell_per_block, axis=1)) + np.repeat(self.bf,self.num_of_cell_per_block) # (1, 4)
+        self.net_out = np.matmul(self.state_input, self.Wo) + self.bo # (1, 2)
+        self.net_cell = np.matmul(self.state_input, self.Wg) + self.bg # (1, 4)
 
-        self.c = self.F * c_prev + self.G * self.I
-        self.h = self.O * np.tanh(self.c)
+        # activations in hidden layer
+        self.I = sigmoid.f(self.net_in) # (1, 4)
+        self.F = sigmoid.f(self.net_forget) # (1, 4)
+        self.O = sigmoid.f(self.net_out) # (1, 2)
 
-        self.output_y = np.matmul(self.h, self.Wy) + self.by
+        self.c = self.F * c_prev + self.I * sigmoid.g(self.net_cell) # (1, 4)
+        self.h = np.repeat(self.O, self.num_of_cell_per_block) * sigmoid.h(self.c) # (1, 4)
 
-        return self.h, self.c, self.output_y
+        # net input and activations of output units
+        self.net_k = np.matmul(self.h, self.Wy) + self.by # (4,) * (4, 4) -> (4,)
+        output_y = sigmoid.f(self.net_k)
 
-    def backward(self):
-        pass
+        # derivatives for input, forget gates and cells
+        ## input gate
+        self.ds_in = self.ds_in * self.F + \
+            np.matmul(self.state_input.T, (sigmoid.g(self.net_cell) * sigmoid.df(self.net_in)))
+        self.ds_in_b = self.ds_in_b * self.F + \
+            (sigmoid.g(self.net_cell) * sigmoid.df(self.net_in))
+
+        ## forget gate
+        self.ds_forget = self.ds_forget * self.F + \
+            np.matmul(self.state_input.T, (sigmoid.h(self.c) * sigmoid.df(self.net_forget)))
+        self.ds_forget_b = self.ds_forget_b * self.F + \
+            (sigmoid.h(self.c) * sigmoid.df(self.net_forget))
+
+        ## cells
+        self.ds_cell = self.ds_cell * self.F + \
+            np.matmul(self.state_input.T, self.I * sigmoid.dg(self.net_cell))
+        self.ds_cell_b = self.ds_cell_b * self.F + \
+            self.I * sigmoid.dg(self.net_cell)
+
+        state = np.hstack((np.sum(self.I.reshape(-1, self.num_of_cell_per_block), axis=1).reshape(1,-1), self.O, np.sum(self.F.reshape(-1, self.num_of_cell_per_block), axis=1).reshape(1,-1)))
+        return state, self.c, self.h, output_y
+
+    def backward(self, ek):
+        ## error and deltas
+        # ek = injected error
+        dfy = sigmoid.df(self.net_k) * ek # output unit delta k
+
+        dh = np.matmul(dfy, self.Wy.T)
+        dO = np.sum((dh * sigmoid.h(self.c)).reshape(-1,self.num_of_cell_per_block), axis=1)
+        dnet_out = dO * sigmoid.df(self.net_out) # output gate delta out
+
+        dc = dh * np.repeat(self.O, self.num_of_cell_per_block) * sigmoid.dh(self.c) # input gate, forget gate es (1, 4)
+        
+        ## weight updates
+        # output units and output gates
+        self.dWy = np.matmul(self.h.T, dfy)
+        self.dby = np.sum(dfy, axis=0)
+        self.dWo = np.dot(self.state_input.T, dnet_out)
+        self.dbo = np.sum(dnet_out, axis=0)
+        
+        # input gates
+        self.dWi = np.sum((dc * self.ds_in).reshape(-1, self.num_of_cell_per_block), axis=1).reshape(-1, self.num_of_cell_per_block)
+        self.dbi = np.sum((dc * self.ds_in_b).reshape(-1, self.num_of_cell_per_block), axis=1).reshape(1, -1).flatten()
+
+        # forget gates
+        self.dWf = np.sum((dc * self.ds_forget).reshape(-1, self.num_of_cell_per_block), axis=1).reshape(-1, self.num_of_cell_per_block)
+        self.dbf = np.sum((dc * self.ds_forget_b).reshape(-1, self.num_of_cell_per_block), axis=1).reshape(1, -1).flatten()
+
+        # cells
+        self.dWg = dc * self.ds_cell
+        self.dbg = (dc * np.sum(self.ds_cell_b, axis=0)).flatten()
+
+        return
 
 class SoftmaxWithLoss_unit:
     def __init__(self):

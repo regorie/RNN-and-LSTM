@@ -190,8 +190,8 @@ class LSTM97_manyToOne:
         self.wg = np.random.uniform(low=-scale, high=scale, size=(self.num_total_unit+nin, self.num_total_cell))
         self.wy = np.random.uniform(low=-scale, high=scale, size=(self.num_total_cell, nout))
         self.bi = np.array([-2.0, -4.0]) # (논문에 제시)
-        self.bo = np.array([-0.04, 0.08])
-        #self.bo = np.random.uniform(low=-scale, high=scale, size=(2)) # (논문에 제시)
+        #self.bo = np.array([-0.04, 0.08])
+        self.bo = np.random.uniform(low=-scale, high=scale, size=(2)) # (논문에 제시)
         self.bg = np.random.uniform(low=-scale, high=scale, size=(self.num_total_cell))
         self.by = np.random.uniform(low=-scale, high=scale, size=(nout))
         embed_outW = np.eye(nout).astype('f')
@@ -233,7 +233,6 @@ class LSTM97_manyToOne:
 
         for t in range(T):
             self.state_prev, self.c_prev, self.h_prev, output = self.lstm_layer.forward(embedded_input[t], self.state_prev, self.c_prev, self.h_prev)
-            #print(t, self.lstm_layer.I, self.lstm_layer.net_cell, self.c_prev)
 
         loss = self.loss_layer.forward(output, embedded_target)
         return loss
@@ -336,7 +335,6 @@ class LSTMforget_manyToOne:
 
         for t in range(T):
             self.state_prev, self.c_prev, self.h_prev, output = self.lstm_layer.forward(embedded_input[t], self.state_prev, self.c_prev, self.h_prev)
-            #print(t, self.lstm_layer.I, self.lstm_layer.net_cell, self.c_prev)
 
         loss = self.loss_layer.forward(output, embedded_target)
         return loss
